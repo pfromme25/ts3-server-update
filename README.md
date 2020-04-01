@@ -52,3 +52,7 @@ If you only want to know whether a new version is available, you can do a dry ru
 ```
 ts3-update -dv -l INFO
 ```
+
+## Automation
+
+This repository contains an example cron.d file for automation purposes. 
