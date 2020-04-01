@@ -6,7 +6,7 @@ This tool automates the updating process of a Teamspeak3 Server installation.
 
 ## Dependencies
 
-* python3 (3.5.3+)
+* python3 (3.4.2+)
 * python3-requests
 
 ## Configuration

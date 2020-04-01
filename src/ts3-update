@@ -113,7 +113,7 @@ if v_info_http.status_code == 200:
             wget_cmd = ['wget', '-O', dl_path, mirror]
             if not args.verbose:
                 wget_cmd = wget_cmd + ["-q"]
-            subprocess.run(wget_cmd)
+            subprocess.call(wget_cmd)
             sha256sum = subprocess.check_output(['sha256sum', dl_path])
             sha_output = sha256sum.decode('ascii')
             logger.info("sha256sum: " + sha_output)
@@ -121,12 +121,12 @@ if v_info_http.status_code == 200:
             if checksum_dl == checksum:
                 logger.info("Checksums match, good to go!")
                 becomeRootUser()
-                subprocess.run(stop)
+                subprocess.call(stop)
                 becomeTSUser()
                 tar_output = subprocess.check_output(["tar", "-C", ts_dir_root, "-xjf", dl_path, "--verbose"])
                 logger.info(tar_output.decode('utf-8'))
                 becomeRootUser()
-                subprocess.run(start)
+                subprocess.call(start)
                 os.remove(dl_path)
                 logger.info("Removing "+dl_path)
             else:
