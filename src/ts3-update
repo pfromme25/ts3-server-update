@@ -1,0 +1,146 @@
+#!/usr/bin/python3
+# Copyright (C) 2020 Philipp Fromme
+#
+# This file is part of ts3-server-update, a tool to easily update a Teamspeak3 server installation.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+import sys
+import os
+import pwd
+import requests
+import json
+import subprocess
+import shutil
+import argparse
+import configparser
+import logging
+from distutils.version import StrictVersion
+
+def becomeTSUser():
+    os.setregid(root_gid, ts_gid)
+    os.setreuid(root_uid, ts_uid)
+
+def becomeRootUser():
+    os.setregid(root_gid, root_gid)
+    os.setreuid(root_uid, root_uid)
+
+parser = argparse.ArgumentParser(description="Updates a local teamspeak3 server installation.")
+parser.add_argument("-d", "--dry", help="Do not write anything to disk, only output whether the server needs to be updated.", action="store_true")
+parser.add_argument("-n", "--nobackup", help="Do not create a backup of the ts3 database before updating.", action="store_true")
+parser.add_argument("-l", "--level", help="Set the log level to use.", nargs="?", default="WARNING")
+parser.add_argument("-v", "--verbose", help="Verbose output.", action="store_true")
+args = parser.parse_args()
+
+config = configparser.ConfigParser()
+config.read('/etc/ts3-update.conf')
+# System vars
+system_os = config.get('system', 'os')
+arch = config.get('system', 'arch')
+rootu = config.get('system', 'rootu')
+logDir = config.get('system', 'logdir')
+# Init vars
+start = config.get('init', 'start').split()
+stop = config.get('init', 'stop').split()
+# Teamspeak vars
+dl_dir = config.get('teamspeak', 'dl_dir')
+ts_dir = config.get('teamspeak', 'ts_dir')
+ts_dir_root = os.path.abspath(os.path.join(ts_dir, '..'))
+backup_dir = config.get('teamspeak', 'backup_dir')
+user = config.get('teamspeak', 'user')
+
+logging.basicConfig(format='%(asctime)s %(name)s:%(message)s', datefmt='%b %d %H:%M:%S', filename=os.path.join(logDir, "ts3-update.log"), level=args.level)
+logger = logging.getLogger()
+if args.verbose:
+    printLogger = logging.StreamHandler(sys.stdout)
+    logger.addHandler(printLogger)
+
+root_uid = pwd.getpwnam(rootu).pw_uid
+root_gid = pwd.getpwnam(rootu).pw_gid
+ts_uid = pwd.getpwnam(user).pw_uid
+ts_gid = pwd.getpwnam(user).pw_gid
+
+becomeTSUser()
+
+clog_path = os.path.join(ts_dir, "CHANGELOG")
+if os.path.exists(clog_path):
+    with open(clog_path, 'r') as f:
+        for line in f.readlines():
+            if line.startswith("## Server Release "):
+                header = line.split()
+                version_installed = header[3]
+                logger.debug("Installed Version: " + version_installed)
+                break
+else:
+    logger.warning("CHANGELOG file at " + clog_path + " not found.")
+    logger.warning("Update stopped, no files have been changed.")
+
+v_info_url = "https://teamspeak.com/versions/server.json"
+v_info_http = requests.get(v_info_url)
+
+columns = shutil.get_terminal_size().columns
+
+if v_info_http.status_code == 200:
+    v_info_json = json.loads(v_info_http.content.decode('utf-8'))
+    v_info = v_info_json[system_os][arch]
+    version_dl = v_info["version"]
+    checksum = v_info["checksum"]
+    mirror = v_info["mirrors"]["teamspeak.com"]
+    mirror_split = [x.strip() for x in mirror.split('/')]
+    filename = mirror_split[-1]
+    dl_path = os.path.join(dl_dir, filename)
+    if StrictVersion(version_dl) > StrictVersion(version_installed):
+        logger.info("New Version: "+version_dl)
+        logger.info("Mirror: "+mirror)
+        logger.info("Filename: "+filename)
+        logger.info("Download Path: "+dl_path)
+        logger.info("Checksum: "+checksum)
+        if not args.dry:
+            if not args.nobackup:
+                ts3_database = os.path.join(ts_dir, "ts3server.sqlitedb")
+                cp = subprocess.check_output(['cp', '-v', '--backup=numbered', ts3_database, backup_dir])
+                cp_output = cp.decode('ascii')
+                logger.info("backup: "+ cp_output)
+            wget_cmd = ['wget', '-O', dl_path, mirror]
+            if not args.verbose:
+                wget_cmd = wget_cmd + ["-q"]
+            subprocess.run(wget_cmd)
+            sha256sum = subprocess.check_output(['sha256sum', dl_path])
+            sha_output = sha256sum.decode('ascii')
+            logger.info("sha256sum: " + sha_output)
+            checksum_dl = sha_output.split(' ')[0]
+            if checksum_dl == checksum:
+                logger.info("Checksums match, good to go!")
+                becomeRootUser()
+                subprocess.run(stop)
+                becomeTSUser()
+                tar_output = subprocess.check_output(["tar", "-C", ts_dir_root, "-xjf", dl_path, "--verbose"])
+                logger.info(tar_output.decode('utf-8'))
+                becomeRootUser()
+                subprocess.run(start)
+                os.remove(dl_path)
+                logger.info("Removing "+dl_path)
+            else:
+                logger.warning("Checksum DONT match! Check if something went wrong.")
+                logger.warning("Online checksum: "+checksum)
+                logger.warning("Downloaded File: "+checksum_dl)
+                logger.warning("URL: "+mirror)
+    else:
+        logger.debug("Installed version is equal or greater than the version to be downloaded.")
+        logger.debug("Version installed: "+version_installed)
+        logger.debug("Version to install: "+version_dl)
+else:
+    logger.error("Could not retrieve version information from "+v_info_url)
+    logger.error("HTTP Error code: "+ str(v_info_http))
+    logger.error("Script stopped. Nothing has been changed.")

@@ -1,0 +1,1 @@
+0 5 * * * root /usr/local/sbin/ts3-update -l INFO
