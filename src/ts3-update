@@ -89,8 +89,6 @@ else:
 v_info_url = "https://teamspeak.com/versions/server.json"
 v_info_http = requests.get(v_info_url)
 
-columns = shutil.get_terminal_size().columns
-
 if v_info_http.status_code == 200:
     v_info_json = json.loads(v_info_http.content.decode('utf-8'))
     v_info = v_info_json[system_os][arch]
