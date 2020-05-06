@@ -26,6 +26,7 @@ import shutil
 import argparse
 import configparser
 import logging
+import urllib.request
 from distutils.version import StrictVersion
 
 def becomeTSUser():
@@ -110,10 +111,7 @@ if v_info_http.status_code == 200:
                 cp = subprocess.check_output(['cp', '-v', '--backup=numbered', ts3_database, backup_dir])
                 cp_output = cp.decode('ascii')
                 logger.info("backup: "+ cp_output)
-            wget_cmd = ['wget', '-O', dl_path, mirror]
-            if not args.verbose:
-                wget_cmd = wget_cmd + ["-q"]
-            subprocess.run(wget_cmd)
+            urllib.request.urlretrieve(mirror, dl_path)
             sha256sum = subprocess.check_output(['sha256sum', dl_path])
             sha_output = sha256sum.decode('ascii')
             logger.info("sha256sum: " + sha_output)
